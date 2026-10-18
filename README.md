@@ -38,6 +38,10 @@ Versions figées par `package-lock.json` : Phaser 3.90.0, Vite 7.3.7, TypeScript
 ### Panneau développeur (mode `npm run dev` uniquement)
 Bouton **DEV** en bas à gauche : +100 / +1000 t de pierre, « Max atelier », temps ×1/×4/×10, inspection de la sauvegarde, remise à zéro **avec confirmation**. Absent du build de production. Aucun crédit automatique, aucun reset systématique.
 
+## Déploiement (GitHub Pages)
+Le workflow `.github/workflows/pages.yml` teste, construit et publie `dist/` à chaque push sur `main` (ou à la main via *Actions → Run workflow*). Le build utilise des chemins relatifs (`base: './'`) : il fonctionne sous `https://<compte>.github.io/<dépôt>/`.
+**À faire une fois** : *Settings → Pages → Build and deployment → Source : GitHub Actions*.
+
 ## Organisation du code
 
 | Dossier | Rôle |
