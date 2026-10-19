@@ -1,38 +1,57 @@
 import { describe, expect, it } from 'vitest';
 import { SaveStore, type StorageLike } from '../src/storage/storage';
-import { applyDeposit, purchaseUpgrade } from '../src/logic/economy';
-import { createDefaultSave, validateSave } from '../src/logic/save-model';
+import { depositCargo } from '../src/logic/inventory';
+import { startJob } from '../src/logic/refinery';
+import { ensureBoard } from '../src/logic/contracts';
+import { createDefaultSave, validateSave, cloneSave } from '../src/logic/save-model';
+import { mustOk, saveWith } from './helpers';
 
 class MemoryStorage implements StorageLike {
   data = new Map<string, string>();
-  getItem(k: string) {
-    return this.data.has(k) ? (this.data.get(k) as string) : null;
-  }
-  setItem(k: string, v: string) {
-    this.data.set(k, v);
-  }
-  removeItem(k: string) {
-    this.data.delete(k);
-  }
+  getItem(k: string) { return this.data.has(k) ? (this.data.get(k) as string) : null; }
+  setItem(k: string, v: string) { this.data.set(k, v); }
+  removeItem(k: string) { this.data.delete(k); }
 }
+const KEY = 'spacetrash.save.v1';
 
 describe('validation', () => {
-  it('accepte une sauvegarde par défaut', () => {
+  it('accepte une sauvegarde par défaut et une partie avancée', () => {
     expect(validateSave(JSON.parse(JSON.stringify(createDefaultSave('x'))))).not.toBeNull();
+    let s = ensureBoard(saveWith({ buildings: { office: 2, refinery: 1 }, stock: { scrap: 30 } }));
+    s = mustOk(startJob(s, 'ingots', 3, 'j'));
+    s.drone.built = true;
+    s.ship.owned.push('laser');
+    s.ship.equipped = 'laser';
+    expect(validateSave(JSON.parse(JSON.stringify(s)))).toEqual(s);
   });
-  it('refuse entiers négatifs, flottants, types faux et schéma inconnu', () => {
+
+  it('refuse les valeurs invalides (jamais de réparation silencieuse)', () => {
     const base = () => JSON.parse(JSON.stringify(createDefaultSave('x')));
-    const a = base(); a.stock.stone = -5;
-    const b = base(); b.stock.stone = 1.5;
-    const c = base(); c.levels.cargo = 'beaucoup';
-    const d = base(); d.schema = 99;
-    const e = base(); d.levels.cargo = 13; e.levels.hull = 13;
-    const f = base(); f.unlockedRegions = [2];
-    for (const x of [a, b, c, d, e, f]) expect(validateSave(x)).toBeNull();
+    const cases: ((s: ReturnType<typeof base>) => void)[] = [
+      (s) => { s.stock.rock = -5; },
+      (s) => { s.stock.rock = 1.5; },
+      (s) => { s.credits = 'beaucoup'; },
+      (s) => { s.schema = 99; },
+      (s) => { s.ship.levels.cargo = 7; },
+      (s) => { s.buildings.refinery = 4; },
+      (s) => { s.buildings.workshop = 0; },
+      (s) => { s.sectors.unlocked = ['nebula']; },
+      (s) => { s.ship.equipped = 'laser'; },
+      (s) => { s.drone.status = 'perdu'; },
+      (s) => { delete s.stock.cores; },
+      (s) => { s.contracts.active = [{ id: 'a', kind: 'ordinary', templateId: 'c-rock', mult: 1, delivered: { rock: -1 } }]; },
+      (s) => { s.refinery.jobs = [{ id: 'j', recipe: 'inconnue', qty: 1, total: 1, remaining: 1, delivered: 0 }]; },
+    ];
+    for (const mutate of cases) {
+      const s = base();
+      mutate(s);
+      expect(validateSave(s)).toBeNull();
+    }
     expect(validateSave(null)).toBeNull();
     expect(validateSave('texte')).toBeNull();
   });
-  it('remet des réglages par défaut si ils sont invalides', () => {
+
+  it('remplace des réglages invalides par les valeurs par défaut', () => {
     const s = JSON.parse(JSON.stringify(createDefaultSave('x')));
     s.settings = { musicVolume: -3, joystickSide: 'haut' };
     const v = validateSave(s);
@@ -42,21 +61,18 @@ describe('validation', () => {
 });
 
 describe('stockage', () => {
-  it('sauvegarde puis recharge exactement', () => {
+  it('sauvegarde puis recharge exactement toute la progression', () => {
     const mem = new MemoryStorage();
     const store = new SaveStore(mem);
     expect(store.load().status).toBe('new');
     let s = createDefaultSave('p1');
-    const dep = applyDeposit(s, 'tx-a', 12);
-    if (!dep.ok) throw new Error();
-    s = dep.state;
-    const up = purchaseUpgrade(s, 'cargo', 'tx-b');
-    if (!up.ok) throw new Error();
-    s = up.state;
+    s = mustOk(depositCargo(s, 'tx-a', { rock: 12, scrap: 5 }).result);
+    s = ensureBoard({ ...s, buildings: { ...s.buildings, office: 1 } });
     s.settings.muted = true;
-    s.settings.joystickSide = 'left';
+    s.sectors.visited.push('belt');
+    s.sectors.discovered.belt = ['belt-d0', 'belt-d1'];
+    s.sectors.uniquesDone = ['belt-container'];
     expect(store.save(s).ok).toBe(true);
-
     const reloaded = new SaveStore(mem).load();
     expect(reloaded.status).toBe('ok');
     expect(reloaded.data).toEqual(s);
@@ -65,74 +81,56 @@ describe('stockage', () => {
   it('rechargement : rejouer une transaction déjà enregistrée ne duplique rien', () => {
     const mem = new MemoryStorage();
     const store = new SaveStore(mem);
-    let s = createDefaultSave('p1');
-    const dep = applyDeposit(s, 'run1:d1', 5);
-    if (!dep.ok) throw new Error();
-    s = dep.state;
+    const s = mustOk(depositCargo(createDefaultSave('p1'), 'run1:d1', { rock: 5 }).result);
     store.save(s);
     const loaded = new SaveStore(mem).load().data;
     if (!loaded) throw new Error();
-    const replay = applyDeposit(loaded, 'run1:d1', 5);
-    expect(replay.ok).toBe(false);
-    expect(replay.state.stock.stone).toBe(50);
+    const replay = depositCargo(loaded, 'run1:d1', { rock: 5 });
+    expect(replay.result.ok).toBe(false);
+    expect(replay.result.state.stock.rock).toBe(5);
   });
 
   it('sauvegarde corrompue : récupération explicite, copie conservée, rien écrasé', () => {
     const mem = new MemoryStorage();
     const store = new SaveStore(mem);
     const s1 = createDefaultSave('p1');
-    store.save(s1); // main = s1
-    const dep = applyDeposit(s1, 'a', 4);
-    if (!dep.ok) throw new Error();
-    store.save(dep.state); // backup = s1, main = dep
-    mem.setItem('eboueurs.save.v1', '{ceci n est pas du json');
-
+    store.save(s1);
+    const s2 = cloneSave(s1);
+    s2.credits = 99;
+    store.save(s2);
+    mem.setItem(KEY, '{ceci n est pas du json');
     const fresh = new SaveStore(mem);
     const res = fresh.load();
     expect(res.status).toBe('corrupt');
     expect(res.backupAvailable).toBe(true);
-    // Tant que l'utilisateur n'a rien décidé, aucune écriture.
     expect(fresh.save(createDefaultSave('autre')).ok).toBe(false);
-    expect(mem.getItem('eboueurs.save.v1')).toBe('{ceci n est pas du json');
-
+    expect(mem.getItem(KEY)).toBe('{ceci n est pas du json');
     const restored = fresh.restoreBackup();
     expect(restored.status).toBe('recovered');
     expect(restored.data?.profileId).toBe('p1');
-    expect(fresh.save(restored.data!).ok).toBe(true);
+    expect(fresh.save(restored.data as never).ok).toBe(true);
   });
 
-  it("corruption sans copie : nouveau profil uniquement sur demande, texte corrompu gardé", () => {
+  it('corruption sans copie : nouveau profil uniquement sur demande, contenu conservé', () => {
     const mem = new MemoryStorage();
-    mem.setItem('eboueurs.save.v1', 'xxx');
+    mem.setItem(KEY, 'xxx');
     const store = new SaveStore(mem);
-    const res = store.load();
-    expect(res.status).toBe('corrupt');
-    expect(res.backupAvailable).toBe(false);
+    expect(store.load().backupAvailable).toBe(false);
     expect(store.restoreBackup().data).toBeNull();
-    const fresh = store.startFresh();
-    expect(fresh.profileId).toBeTruthy();
-    expect(mem.getItem('eboueurs.save.v1.corrupt')).toBe('xxx');
+    expect(store.startFresh().profileId).toBeTruthy();
+    expect(mem.getItem(KEY + '.corrupt')).toBe('xxx');
   });
 
-  it('stockage indisponible : mode non persistant signalé, sans crash', () => {
-    const broken: StorageLike = {
-      getItem() { throw new Error('denied'); },
-      setItem() { throw new Error('denied'); },
-      removeItem() { throw new Error('denied'); },
-    };
+  it('stockage indisponible ou plein : signalé sans exception', () => {
+    const broken: StorageLike = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); }, removeItem() { throw new Error('denied'); } };
     const store = new SaveStore(broken);
     expect(store.load().status).toBe('unavailable');
     expect(store.persistent).toBe(false);
     expect(store.save(createDefaultSave('x')).ok).toBe(false);
-    expect(new SaveStore(null).persistent).toBe(false);
-  });
-
-  it("quota dépassé à l'écriture : erreur renvoyée, pas d'exception", () => {
     const mem = new MemoryStorage();
-    const store = new SaveStore(mem);
-    store.load();
+    const s2 = new SaveStore(mem);
+    s2.load();
     mem.setItem = () => { throw new Error('QuotaExceeded'); };
-    const r = store.save(createDefaultSave('x'));
-    expect(r.ok).toBe(false);
+    expect(s2.save(createDefaultSave('x')).ok).toBe(false);
   });
 });

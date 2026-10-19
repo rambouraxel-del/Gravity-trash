@@ -1,8 +1,8 @@
 {
-  "name": "eboueurs-de-l-espace",
+  "name": "space-trash",
   "version": "0.1.0",
   "private": true,
-  "description": "Les Éboueurs de l’espace — lot 1 : première région jouable",
+  "description": "Space Trash — jeu solo 2D de récupération, minage et industrie spatiale (Azerya Studio)",
   "type": "module",
   "scripts": {
     "dev": "vite --host",

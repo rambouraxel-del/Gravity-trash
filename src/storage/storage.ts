@@ -7,9 +7,9 @@ export interface StorageLike {
   removeItem(key: string): void;
 }
 
-export const SAVE_KEY = 'eboueurs.save.v1';
-export const BACKUP_KEY = 'eboueurs.save.v1.backup';
-export const CORRUPT_KEY = 'eboueurs.save.v1.corrupt';
+export const SAVE_KEY = 'spacetrash.save.v1';
+export const BACKUP_KEY = 'spacetrash.save.v1.backup';
+export const CORRUPT_KEY = 'spacetrash.save.v1.corrupt';
 
 export type LoadStatus = 'new' | 'ok' | 'recovered' | 'corrupt' | 'unavailable';
 

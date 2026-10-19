@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#070d1c" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <title>Les Éboueurs de l’espace</title>
+    <title>Space Trash</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%23070d1c'/%3E%3Cpath d='M16 5l6 16-6-3-6 3z' fill='%23f4e6c8'/%3E%3Ccircle cx='16' cy='24' r='2.5' fill='%23ff9a3c'/%3E%3C/svg%3E" />
   </head>
   <body>
@@ -20,13 +20,14 @@
             <div class="bar"><i id="hudCargoFill"></i></div>
             <span id="hudCargoText">Soute 0/12</span>
           </div>
-          <div class="hud-time" id="hudTime" aria-label="Temps restant">4:00</div>
+          <div class="hud-equip" id="hudEquip" hidden></div>
           <button id="btnPause" class="icon-btn" aria-label="Pause" type="button">
             <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg>
           </button>
         </div>
+        <div class="hud-items" id="hudItems"></div>
         <div class="hud-toast" id="hudToast" role="status" aria-live="polite"></div>
-        <canvas id="radar" class="radar" width="88" height="288" aria-label="Radar"></canvas>
+        <canvas id="radar" class="radar" width="200" height="336" aria-label="Mini-carte (toucher pour agrandir)"></canvas>
         <div id="stationArrow" class="station-arrow" hidden>
           <svg viewBox="0 0 40 40" width="34" height="34" aria-hidden="true"><path d="M20 4 L34 32 L20 25 L6 32 Z" fill="#3ee6f0" stroke="#052028" stroke-width="2" stroke-linejoin="round"/></svg>
           <span>Station</span>
@@ -37,7 +38,7 @@
             <div class="joy-hint" id="joyHint">Glisse ici pour piloter</div>
             <div class="joy-base" id="joyBase"><div class="joy-knob" id="joyKnob"></div></div>
           </div>
-          <button id="btnEnd" class="btn end-btn" type="button" hidden>Terminer la sortie</button>
+          <button id="btnEnd" class="btn end-btn" type="button" hidden>Retour station</button>
         </div>
       </div>
 

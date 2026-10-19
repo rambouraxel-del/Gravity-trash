@@ -2,9 +2,9 @@ import Phaser from 'phaser';
 import './styles.css';
 import { App } from './app';
 import { applyLayout, pickRenderScale } from './layout';
-import { BackdropScene } from './scenes/BackdropScene';
 import { BootScene } from './scenes/BootScene';
 import { RunScene } from './scenes/RunScene';
+import { StationScene } from './scenes/StationScene';
 import { LOGICAL_H, LOGICAL_W } from './scenes/view';
 import { SaveStore, browserStorage } from './storage/storage';
 
@@ -25,7 +25,7 @@ const game = new Phaser.Game({
   input: { mouse: false, touch: false, keyboard: false, gamepad: false },
   render: { antialias: true, powerPreference: 'high-performance' },
   fps: { target: 60 },
-  scene: [BootScene, BackdropScene, RunScene],
+  scene: [BootScene, StationScene, RunScene],
 });
 
 const store = new SaveStore(browserStorage());

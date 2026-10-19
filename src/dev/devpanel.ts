@@ -12,14 +12,20 @@ export function installDevPanel(app: App): void {
   panel.innerHTML = `
     <div class="row"><b>Outils développeur (local)</b></div>
     <div class="row">
-      <button class="btn" data-d="s100">+100 t</button>
-      <button class="btn" data-d="s1000">+1000 t</button>
-      <button class="btn" data-d="max">Max atelier</button>
+      <button class="btn" data-d="m100">+100 matières de base</button>
+      <button class="btn" data-d="m1000">+1000 matières (toutes)</button>
+      <button class="btn" data-d="c1000">+1000 💳</button>
+    </div>
+    <div class="row">
+      <button class="btn" data-d="b3">Stations niv. 3</button>
+      <button class="btn" data-d="ship">Vaisseau max</button>
+      <button class="btn" data-d="unlock">Tout débloquer</button>
     </div>
     <div class="row">Temps :
       <button class="btn" data-d="t1">×1</button>
       <button class="btn" data-d="t4">×4</button>
-      <button class="btn" data-d="t10">×10</button>
+      <button class="btn" data-d="t20">×20</button>
+      <button class="btn" data-d="tick">+60 s (raffinerie/drone)</button>
     </div>
     <div class="row">
       <button class="btn" data-d="inspect">Inspecter la sauvegarde</button>
@@ -33,12 +39,16 @@ export function installDevPanel(app: App): void {
     const b = (e.target as HTMLElement).closest<HTMLElement>('[data-d]');
     if (!b) return;
     switch (b.dataset.d) {
-      case 's100': app.devAddStone(100); break;
-      case 's1000': app.devAddStone(1000); break;
-      case 'max': app.devMaxUpgrades(); break;
+      case 'm100': app.devAddStock(100, false); break;
+      case 'm1000': app.devAddStock(1000, true); break;
+      case 'c1000': app.devAddCredits(1000); break;
+      case 'b3': app.devBuildings(); break;
+      case 'ship': app.devShipMax(); break;
+      case 'unlock': app.devUnlockAll(); break;
       case 't1': app.timeScale = 1; break;
       case 't4': app.timeScale = 4; break;
-      case 't10': app.timeScale = 10; break;
+      case 't20': app.timeScale = 20; break;
+      case 'tick': app.devTick(60); break;
       case 'inspect':
         area.hidden = false;
         try {
@@ -52,5 +62,5 @@ export function installDevPanel(app: App): void {
         break;
     }
   });
-  (window as unknown as { __eboueurs: unknown }).__eboueurs = app;
+  (window as unknown as { __spacetrash: unknown }).__spacetrash = app;
 }

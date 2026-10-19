@@ -1,218 +1,236 @@
 import { describe, expect, it } from 'vitest';
-import {
-  applyDeposit,
-  deliver,
-  deliveryStatus,
-  nextUpgradeCost,
-  openNextRegion,
-  purchaseUpgrade,
-  transitionStatus,
-  workshopProgress,
-} from '../src/logic/economy';
-import { createDefaultSave, cloneSave, type SaveData } from '../src/logic/save-model';
-import { BRANCHES } from '../src/config/regions';
+import { BRANCHES } from '../src/config/balance';
+import { depositCargo, receiveHeavy, sellItem } from '../src/logic/inventory';
+import { branchCap, buyEquipment, equip, nextShipCost, purchaseShipUpgrade } from '../src/logic/ship';
+import { buildOrUpgrade, buildStatus } from '../src/logic/station';
+import { deliverJobOutput, maxBatch, startJob } from '../src/logic/refinery';
+import { advance, mustOk, saveWith } from './helpers';
 
-const withStone = (n: number): SaveData => {
-  const s = createDefaultSave('test');
-  s.stock.stone = n;
-  return s;
-};
-const maxed = (s: SaveData): SaveData => {
-  const c = cloneSave(s);
-  for (const b of BRANCHES) c.levels[b] = 3;
-  return c;
-};
+describe('dépôt en entrepôt', () => {
+  it('crédite le stock une seule fois par identifiant', () => {
+    const s = saveWith();
+    const r1 = depositCargo(s, 'tx1', { rock: 7, scrap: 3 });
+    expect(r1.result.ok).toBe(true);
+    const s1 = mustOk(r1.result);
+    expect(s1.stock.rock).toBe(7);
+    expect(s1.stock.scrap).toBe(3);
+    const r2 = depositCargo(s1, 'tx1', { rock: 7, scrap: 3 });
+    expect(r2.result.ok).toBe(false);
+    expect(r2.leftover).toEqual({}); // doublon : déjà crédité, la soute est considérée vidée
+    expect(s1.stock.rock).toBe(7);
+  });
 
-describe('dépôt', () => {
-  it('convertit les fragments en tonnes (10 t chacun) une seule fois par transaction', () => {
-    const s = createDefaultSave('t');
-    const r1 = applyDeposit(s, 'tx1', 7);
-    expect(r1.ok && r1.state.stock.stone).toBe(70);
-    if (!r1.ok) throw new Error();
-    const r2 = applyDeposit(r1.state, 'tx1', 7);
-    expect(r2.ok).toBe(false);
-    expect(r2.state.stock.stone).toBe(70);
+  it('plafonne par matière selon l’entrepôt et renvoie le surplus (jamais détruit)', () => {
+    const s = saveWith({ stock: { rock: 55 } });
+    const r = depositCargo(s, 'tx', { rock: 12, ice: 4 });
+    expect(r.accepted).toEqual({ rock: 5, ice: 4 });
+    expect(r.leftover).toEqual({ rock: 7 });
+    const out = mustOk(r.result);
+    expect(out.stock.rock).toBe(60); // capacité de départ
+    // conservation : stock + reste = avant + apporté
+    expect(out.stock.rock + (r.leftover.rock ?? 0)).toBe(55 + 12);
   });
-  it('refuse une quantité invalide sans rien modifier', () => {
-    const s = createDefaultSave('t');
-    expect(applyDeposit(s, 'a', -1).ok).toBe(false);
-    expect(applyDeposit(s, 'b', 1.5).ok).toBe(false);
-    expect(s.stock.stone).toBe(0);
+
+  it('entrepôt totalement plein : rien n’est crédité, tout reste à bord', () => {
+    const s = saveWith({ stock: { rock: 60 } });
+    const r = depositCargo(s, 'tx', { rock: 5 });
+    expect(r.result.ok).toBe(false);
+    expect(r.leftover).toEqual({ rock: 5 });
+    expect(r.result.state).toBe(s);
   });
-  it("ne modifie pas l'état d'origine", () => {
-    const s = createDefaultSave('t');
-    applyDeposit(s, 'a', 3);
-    expect(s.stock.stone).toBe(0);
-    expect(s.transactions).toEqual([]);
+
+  it('l’entrepôt amélioré augmente la capacité', () => {
+    const s = saveWith({ stock: { rock: 60 }, buildings: { warehouse: 2 } });
+    expect(depositCargo(s, 'tx', { rock: 100 }).accepted).toEqual({ rock: 100 });
+  });
+
+  it('refuse un objet lourd si la place manque, l’accepte sinon', () => {
+    const s = saveWith({ stock: { ice: 50 } });
+    expect(receiveHeavy(s, 'h1', 'ice', 20).ok).toBe(false);
+    expect(mustOk(receiveHeavy(s, 'h2', 'ice', 10)).stock.ice).toBe(60);
   });
 });
 
-describe('achats atomiques', () => {
-  it('suit les prix 40 / 80 / 120 t', () => {
-    let s = withStone(1000);
-    const costs: number[] = [];
-    for (let i = 0; i < 3; i++) {
-      costs.push(nextUpgradeCost(s, 'cargo') as number);
-      const r = purchaseUpgrade(s, 'cargo', `u${i}`);
-      if (!r.ok) throw new Error(r.message);
-      s = r.state;
-    }
-    expect(costs).toEqual([40, 80, 120]);
-    expect(s.stock.stone).toBe(1000 - 240);
-    expect(s.levels.cargo).toBe(3);
-    expect(nextUpgradeCost(s, 'cargo')).toBeNull();
+describe('vente directe', () => {
+  it('exige le bureau commercial, retire le stock et crédite au prix fixe', () => {
+    const s = saveWith({ stock: { crystal: 10 } });
+    expect(sellItem(s, 'crystal', 4, 'v').ok).toBe(false);
+    const o = saveWith({ stock: { crystal: 10 }, buildings: { office: 1 }, credits: 0 });
+    const r = mustOk(sellItem(o, 'crystal', 4, 'v1'));
+    expect(r.credits).toBe(20);
+    expect(r.stock.crystal).toBe(6);
+    expect(sellItem(r, 'crystal', 7, 'v2').ok).toBe(false);
+    expect(sellItem(r, 'crystal', 4, 'v1').ok).toBe(false); // idempotent
   });
-  it('refuse sans stock suffisant, sans aucune modification', () => {
-    const s = withStone(39);
-    const r = purchaseUpgrade(s, 'engine', 'x');
+});
+
+describe('améliorations du vaisseau', () => {
+  it('les coûts suivent le tableau et débitent exactement', () => {
+    let s = saveWith({ stock: { rock: 200, scrap: 100 } });
+    expect(nextShipCost(s, 'cargo')).toEqual({ rock: 30 });
+    s = mustOk(purchaseShipUpgrade(s, 'cargo', 'a'));
+    expect(s.stock.rock).toBe(170);
+    expect(nextShipCost(s, 'cargo')).toEqual({ rock: 60, scrap: 30 });
+    s = mustOk(purchaseShipUpgrade(s, 'cargo', 'b'));
+    expect(s.stock.rock).toBe(110);
+    expect(s.stock.scrap).toBe(70);
+    expect(s.ship.levels.cargo).toBe(2);
+  });
+
+  it('refuse sans matériaux ou au-delà du palier de l’atelier, sans rien modifier', () => {
+    const s = saveWith({ stock: { rock: 10 } });
+    const r = purchaseShipUpgrade(s, 'engine', 'x');
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('insufficient');
     expect(r.state).toBe(s);
-    expect(s.stock.stone).toBe(39);
-    expect(s.levels.engine).toBe(0);
-  });
-  it('ne rejoue pas un double clic (même identifiant)', () => {
-    const s = withStone(500);
-    const r1 = purchaseUpgrade(s, 'hull', 'same');
-    if (!r1.ok) throw new Error();
-    const r2 = purchaseUpgrade(r1.state, 'hull', 'same');
+    const capped = saveWith({ stock: { rock: 500, scrap: 500, ice: 500 } });
+    capped.ship.levels.cargo = 2; // plafond de l'atelier niveau 1
+    expect(branchCap(capped)).toBe(2);
+    const r2 = purchaseShipUpgrade(capped, 'cargo', 'y');
     expect(r2.ok).toBe(false);
-    expect(r2.state.levels.hull).toBe(1);
-    expect(r2.state.stock.stone).toBe(460);
+    if (!r2.ok) expect(r2.reason).toBe('locked');
   });
-  it('plafonne chaque branche à 3 dans la région 1', () => {
-    const s = maxed(withStone(500));
-    const r = purchaseUpgrade(s, 'magnet', 'm');
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('maxed');
-  });
-  it('ne produit jamais de stock négatif', () => {
-    let s = withStone(40);
-    const a = purchaseUpgrade(s, 'cargo', '1');
-    if (a.ok) s = a.state;
-    const b = purchaseUpgrade(s, 'cargo', '2');
+
+  it('un double clic (même identifiant) ne s’applique qu’une fois', () => {
+    const s = saveWith({ stock: { rock: 200 } });
+    const a = mustOk(purchaseShipUpgrade(s, 'hull', 'same'));
+    const b = purchaseShipUpgrade(a, 'hull', 'same');
     expect(b.ok).toBe(false);
-    expect(s.stock.stone).toBe(0);
+    expect(b.state.ship.levels.hull).toBe(1);
+    expect(b.state.stock.rock).toBe(170);
   });
-  it("compte l'atelier x/12", () => {
-    let s = withStone(1000);
-    expect(workshopProgress(s)).toEqual({ done: 0, total: 12 });
-    const r = purchaseUpgrade(s, 'cargo', 'a');
-    if (r.ok) s = r.state;
-    expect(workshopProgress(s).done).toBe(1);
-    expect(workshopProgress(maxed(s)).done).toBe(12);
+
+  it('toutes les branches existent et partent de zéro', () => {
+    expect(BRANCHES.map((b) => saveWith().ship.levels[b])).toEqual([0, 0, 0, 0]);
   });
 });
 
-describe('livraison et compteur « livré »', () => {
-  it('est verrouillée tant que les 4 branches ne sont pas maximisées, avec la cause', () => {
-    const s = withStone(2000);
-    const st = deliveryStatus(s);
-    expect(st.unlocked).toBe(false);
-    expect(st.lockReason).toContain('0/12');
-    const r = deliver(s, 100, 'd1');
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('locked');
-    expect(s.stock.stone).toBe(2000);
+describe('équipements', () => {
+  const rich = () => saveWith({ stock: { ingots: 50, circuits: 20, cells: 20 }, credits: 2000, buildings: { workshop: 2 } });
+
+  it('exigent l’atelier niveau 2, les matières et les crédits', () => {
+    expect(buyEquipment(saveWith({ stock: { ingots: 50, circuits: 20 }, credits: 2000 }), 'laser', 'x').ok).toBe(false);
+    const s = mustOk(buyEquipment(rich(), 'laser', 'l'));
+    expect(s.ship.owned).toEqual(['laser']);
+    expect(s.credits).toBe(1750);
+    expect(s.stock.ingots).toBe(42);
+    expect(buyEquipment(s, 'laser', 'l2').ok).toBe(false);
   });
-  it('retire du stock et crédite le compteur livré (partielle possible)', () => {
-    const s = maxed(withStone(300));
-    const r = deliver(s, 120, 'd1');
-    if (!r.ok) throw new Error(r.message);
-    expect(r.state.stock.stone).toBe(180);
-    expect(r.state.delivered[0]).toBe(120);
-    const r2 = deliver(r.state, 80, 'd2');
-    if (!r2.ok) throw new Error(r2.message);
-    expect(r2.state.delivered[0]).toBe(200);
-    expect(r2.state.stock.stone).toBe(100);
-  });
-  it('ne livre pas plus que le stock ni plus que le reste du quota', () => {
-    const s = maxed(withStone(50));
-    expect(deliver(s, 60, 'a').ok).toBe(false);
-    const rich = maxed(withStone(5000));
-    expect(deliver(rich, 1001, 'b').ok).toBe(false);
-    expect(deliveryStatus(rich).maxDeliverable).toBe(1000);
-  });
-  it('les achats ne comptent jamais comme livraison', () => {
-    let s = withStone(1000);
-    for (const b of BRANCHES) {
-      for (let i = 0; i < 3; i++) {
-        const r = purchaseUpgrade(s, b, `${b}${i}`);
-        if (r.ok) s = r.state;
-      }
-    }
-    expect(s.delivered[0]).toBe(0);
-  });
-  it('conserve un stock économisé avant maximisation pour la livraison', () => {
-    let s = withStone(960 + 1000);
-    for (const b of BRANCHES) {
-      for (let i = 0; i < 3; i++) {
-        const r = purchaseUpgrade(s, b, `${b}${i}`);
-        if (!r.ok) throw new Error(r.message);
-        s = r.state;
-      }
-    }
-    expect(s.stock.stone).toBe(1000);
-    const r = deliver(s, 1000, 'all');
-    expect(r.ok).toBe(true);
-  });
-  it('est idempotente', () => {
-    const s = maxed(withStone(500));
-    const a = deliver(s, 100, 'same');
-    if (!a.ok) throw new Error();
-    const b = deliver(a.state, 100, 'same');
-    expect(b.ok).toBe(false);
-    expect(b.state.delivered[0]).toBe(100);
+
+  it('un seul outil équipé à la fois, seulement s’il est possédé', () => {
+    let s = mustOk(buyEquipment(rich(), 'laser', 'l'));
+    s = mustOk(buyEquipment(s, 'tractor', 't'));
+    expect(equip(rich(), 'laser', 'e').ok).toBe(false);
+    s = mustOk(equip(s, 'laser', 'e1'));
+    expect(s.ship.equipped).toBe('laser');
+    s = mustOk(equip(s, 'tractor', 'e2'));
+    expect(s.ship.equipped).toBe('tractor');
+    s = mustOk(equip(s, null, 'e3'));
+    expect(s.ship.equipped).toBeNull();
   });
 });
 
-describe('transition vers la région 2', () => {
-  it('branches maximisées SEULES ne suffisent pas', () => {
-    const s = maxed(withStone(0));
-    const t = transitionStatus(s);
-    expect(t.upgradesOk).toBe(true);
-    expect(t.canOpen).toBe(false);
-    expect(openNextRegion(s, 'o').ok).toBe(false);
+describe('construction de la station', () => {
+  it('l’atelier et un stockage de départ sont disponibles, les quatre autres installations sont à construire', () => {
+    const s = saveWith();
+    expect(s.buildings).toEqual({ workshop: 1, warehouse: 0, refinery: 0, office: 0, hangar: 0 });
   });
-  it('quota livré SEUL ne suffit pas', () => {
-    const s = withStone(0);
-    s.delivered[0] = 1000;
-    const t = transitionStatus(s);
-    expect(t.deliveryOk).toBe(true);
-    expect(t.canOpen).toBe(false);
-    expect(openNextRegion(s, 'o').ok).toBe(false);
+
+  it('construire consomme matières et crédits, passe au niveau suivant, jusqu’au niveau 3', () => {
+    let s = saveWith({ stock: { rock: 40, scrap: 20 } });
+    s = mustOk(buildOrUpgrade(s, 'warehouse', 'b1'));
+    expect(s.buildings.warehouse).toBe(1);
+    expect(s.stock.rock).toBe(0);
+    expect(s.stock.scrap).toBe(0);
+    const big = saveWith({ stock: { rock: 500, scrap: 500, ingots: 100, cells: 50, circuits: 50 }, credits: 5000 });
+    let b = mustOk(buildOrUpgrade(big, 'warehouse', 'u1'));
+    b = mustOk(buildOrUpgrade(b, 'warehouse', 'u2'));
+    b = mustOk(buildOrUpgrade(b, 'warehouse', 'u3'));
+    expect(b.buildings.warehouse).toBe(3);
+    expect(buildStatus(b, 'warehouse').maxed).toBe(true);
+    expect(buildOrUpgrade(b, 'warehouse', 'u4').ok).toBe(false);
   });
-  it('les deux conditions ouvrent la région 2, une seule fois', () => {
-    const s = maxed(withStone(0));
-    s.delivered[0] = 1000;
-    expect(transitionStatus(s).canOpen).toBe(true);
-    const r = openNextRegion(s, 'open');
-    if (!r.ok) throw new Error(r.message);
-    expect(r.state.unlockedRegions).toEqual([1, 2]);
-    const again = openNextRegion(r.state, 'open2');
-    expect(again.ok).toBe(false);
-    expect(transitionStatus(r.state).alreadyUnlocked).toBe(true);
+
+  it('refuse si une matière ou des crédits manquent, sans modification partielle', () => {
+    const s = saveWith({ stock: { rock: 100, scrap: 100 }, credits: 10 });
+    const r = buildOrUpgrade(s, 'office', 'x');
+    expect(r.ok).toBe(false);
+    expect(r.state).toBe(s);
+    expect(s.stock.rock).toBe(100);
   });
-  it('les niveaux sont conservés au passage', () => {
-    const s = maxed(withStone(0));
-    s.delivered[0] = 1000;
-    const r = openNextRegion(s, 'open');
-    if (!r.ok) throw new Error();
-    for (const b of BRANCHES) expect(r.state.levels[b]).toBe(3);
+
+  it('le hangar exige la licence de drone', () => {
+    const rich = saveWith({ stock: { ingots: 100, circuits: 100, techparts: 50 }, credits: 9999 });
+    const r = buildOrUpgrade(rich, 'hangar', 'h');
+    expect(r.ok).toBe(false);
+    expect(buildStatus(rich, 'hangar').lockReason).toContain('licence');
+    const licensed = saveWith({ stock: { ingots: 100, circuits: 100, techparts: 50 }, credits: 9999, flags: { hangarUnlocked: true } });
+    expect(buildOrUpgrade(licensed, 'hangar', 'h2').ok).toBe(true);
   });
-  it('parcours complet : 1 960 t de pierre au total', () => {
-    let s = withStone(1960);
-    for (const b of BRANCHES) {
-      for (let i = 0; i < 3; i++) {
-        const r = purchaseUpgrade(s, b, `${b}${i}`);
-        if (!r.ok) throw new Error(r.message);
-        s = r.state;
-      }
-    }
-    const d = deliver(s, 1000, 'd');
-    if (!d.ok) throw new Error(d.message);
-    const o = openNextRegion(d.state, 'o');
-    expect(o.ok).toBe(true);
-    if (o.ok) expect(o.state.stock.stone).toBe(0);
+
+  it('les crédits ne remplacent jamais les matériaux', () => {
+    const s = saveWith({ credits: 100000 });
+    expect(buildOrUpgrade(s, 'warehouse', 'w').ok).toBe(false);
+  });
+});
+
+describe('raffinerie', () => {
+  const ready = (stock = {}) => saveWith({ stock: { scrap: 30, ice: 10, crystal: 10, circuits: 10, ingots: 10, ...stock }, buildings: { refinery: 1 } });
+
+  it('consomme réellement les matières au lancement', () => {
+    const s = mustOk(startJob(ready(), 'ingots', 5, 'j1'));
+    expect(s.stock.scrap).toBe(15);
+    expect(s.refinery.jobs).toHaveLength(1);
+    expect(s.refinery.jobs[0].total).toBeCloseTo(40, 5); // 5 × 8 s
+  });
+
+  it('refuse sans matière, sans raffinerie, au-delà du lot ou des chaînes disponibles', () => {
+    expect(startJob(saveWith({ stock: { scrap: 30 } }), 'ingots', 1, 'x').ok).toBe(false);
+    expect(startJob(ready({ scrap: 2 }), 'ingots', 1, 'x').ok).toBe(false);
+    expect(startJob(ready(), 'ingots', 6, 'x').ok).toBe(false); // lot max 5 au niveau 1
+    const one = mustOk(startJob(ready(), 'ingots', 2, 'a'));
+    expect(startJob(one, 'cells', 1, 'b').ok).toBe(false); // une seule chaîne au niveau 1
+    expect(maxBatch(ready(), 'ingots')).toBe(5);
+    expect(maxBatch(ready({ scrap: 7 }), 'ingots')).toBe(2);
+  });
+
+  it('les trois chaînes de la V1 produisent les bons produits', () => {
+    let s = ready({ ice: 10, crystal: 5, ingots: 10, circuits: 3 });
+    s = { ...s, buildings: { ...s.buildings, refinery: 3 } };
+    s = mustOk(startJob(s, 'cells', 2, 'c'));
+    expect([s.stock.ice, s.stock.crystal]).toEqual([6, 3]);
+    s = mustOk(startJob(s, 'techparts', 3, 't'));
+    expect([s.stock.ingots, s.stock.circuits]).toEqual([4, 0]);
+  });
+
+  it('une production terminée verse le produit une seule fois', () => {
+    let s = mustOk(startJob(ready(), 'ingots', 2, 'j1'));
+    expect(deliverJobOutput(s, 'j1').ok).toBe(false); // en cours
+    const rep = advance(s, 100);
+    expect(rep.jobsFinished).toEqual(['j1']);
+    const before = s.stock.ingots;
+    s = mustOk(deliverJobOutput(s, 'j1'));
+    expect(s.stock.ingots).toBe(before + 2);
+    expect(s.refinery.jobs).toHaveLength(0);
+    expect(deliverJobOutput(s, 'j1').ok).toBe(false);
+  });
+
+  it('entrepôt plein : la sortie attend, puis se verse en deux temps sans perte', () => {
+    let s = ready({ ingots: 59 });
+    s = mustOk(startJob(s, 'ingots', 5, 'tx'));
+    advance(s, 1000);
+    s = mustOk(deliverJobOutput(s, 'j1'));
+    expect(s.stock.ingots).toBe(60);
+    expect(s.refinery.jobs[0].delivered).toBe(1);
+    expect(deliverJobOutput(s, 'j1').ok).toBe(false); // plein
+    s = { ...s, stock: { ...s.stock, ingots: 20 } };
+    s = mustOk(deliverJobOutput(s, 'j1'));
+    expect(s.stock.ingots).toBe(24);
+    expect(s.refinery.jobs).toHaveLength(0);
+  });
+
+  it('un niveau supérieur accélère le traitement', () => {
+    const s1 = mustOk(startJob(ready(), 'ingots', 5, 'a'));
+    const s3 = mustOk(startJob({ ...ready(), buildings: { ...ready().buildings, refinery: 3 } }, 'ingots', 5, 'a'));
+    expect(s3.refinery.jobs[0].total).toBeLessThan(s1.refinery.jobs[0].total);
   });
 });

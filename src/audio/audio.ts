@@ -5,7 +5,8 @@ import type { Settings } from '../logic/save-model';
 export type MusicMode = 'off' | 'menu' | 'run';
 export type SfxName =
   | 'collect' | 'extract' | 'full' | 'impact' | 'deposit' | 'purchase'
-  | 'warning' | 'warningLast' | 'storm' | 'repair' | 'click' | 'deliver' | 'unlock';
+  | 'warning' | 'warningLast' | 'storm' | 'repair' | 'click' | 'deliver' | 'unlock'
+  | 'laser' | 'discover' | 'sell' | 'build' | 'contract';
 
 const midi = (n: number) => 440 * Math.pow(2, (n - 69) / 12);
 
@@ -466,6 +467,31 @@ export class AudioManager {
         if (!this.canPlay(name, 0.5)) return;
         this.tone(midi(64), t, 0.25, 0.14, 'triangle');
         this.tone(midi(71), t + 0.12, 0.35, 0.14, 'triangle');
+        break;
+      case 'laser':
+        if (!this.canPlay(name, 0.12)) return;
+        this.tone(midi(55), t, 0.16, 0.1, 'sawtooth', midi(60));
+        this.noiseBurst(this.sfxBus, t, 0.1, 0.05, 'bandpass', 2400, 1.5);
+        break;
+      case 'discover':
+        if (!this.canPlay(name, 0.6)) return;
+        this.tone(midi(81), t, 0.2, 0.08, 'sine');
+        this.tone(midi(88), t + 0.12, 0.3, 0.07, 'sine');
+        break;
+      case 'sell':
+        if (!this.canPlay(name, 0.1)) return;
+        this.tone(midi(84), t, 0.09, 0.12, 'triangle');
+        this.tone(midi(91), t + 0.06, 0.18, 0.12, 'triangle');
+        break;
+      case 'build':
+        if (!this.canPlay(name, 0.3)) return;
+        this.tone(midi(40), t, 0.3, 0.3, 'sine', midi(36));
+        [60, 64, 67, 72].forEach((n, i) => this.tone(midi(n), t + 0.12 + i * 0.07, 0.4, 0.13, 'triangle'));
+        this.noiseBurst(this.sfxBus, t, 0.25, 0.1, 'lowpass', 900);
+        break;
+      case 'contract':
+        if (!this.canPlay(name, 0.3)) return;
+        [67, 72, 76, 79, 84].forEach((n, i) => this.tone(midi(n), t + i * 0.07, 0.5, 0.13, 'triangle'));
         break;
       case 'click':
         if (!this.canPlay(name, 0.03)) return;
