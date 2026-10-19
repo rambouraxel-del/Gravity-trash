@@ -12,7 +12,7 @@ Prérequis : Node.js 22+.
 ```bash
 npm install
 npm run dev        # http://localhost:5173 (accessible sur le réseau local)
-npm test           # 96 tests de la logique (Vitest)
+npm test           # 99 tests de la logique (Vitest)
 npm run build      # vérification de types + build de production dans dist/
 npm run preview    # sert le build de production
 ```
@@ -55,7 +55,7 @@ Bouton **DEV** : ajouter des matières (plafonnées à l’entrepôt) ou des cr�
 | `src/ui/` | HUD et panneaux en DOM |
 | `src/audio/` | synthèse Web Audio (musique et sons provisoires) |
 | `src/input/` | joystick flottant et clavier |
-| `tests/` | tests Vitest (96) |
+| `tests/` | tests Vitest (99) |
 | `scripts/` | tests navigateur Playwright (optionnels) |
 
 ### Remplacer les assets
@@ -69,7 +69,7 @@ Les images sont dessinées par code (Canvas 2D) dans `src/scenes/textures.ts`, u
 
 ## Tests
 ```bash
-npm test                                   # 96 tests de logique
+npm test                                   # 99 tests de logique
 npm run dev &                              # puis, avec Playwright installé :
 node scripts/flow.mjs  http://127.0.0.1:5173/ shots   # parcours complet (50 vérifications)
 node scripts/smoke.mjs http://127.0.0.1:5173/ shots   # écrans, commandes, pause, son (29 vérifications)
